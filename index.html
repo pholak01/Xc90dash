@@ -14,7 +14,7 @@
 :root{--red:#ee1f1a;--dim:rgba(255,255,255,.5);--font:Saira,system-ui,sans-serif}
 *{box-sizing:border-box;min-width:0;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:#000;color:#fff;font-family:var(--font);overflow:hidden;user-select:none}
-#app{height:100dvh;display:flex;flex-direction:column;
+#app{height:100vh;height:100dvh;display:flex;flex-direction:column;
   padding:env(safe-area-inset-top) max(10px,env(safe-area-inset-right)) env(safe-area-inset-bottom) max(10px,env(safe-area-inset-left))}
 header{display:flex;align-items:center;gap:12px;height:44px;flex:none}
 #temp,#clock{font-size:18px;font-weight:500;font-variant-numeric:tabular-nums}
@@ -25,7 +25,7 @@ header{display:flex;align-items:center;gap:12px;height:44px;flex:none}
 button{font:500 13px var(--font);color:#fff;background:#151515;border:1px solid #333;border-radius:20px;padding:0 14px;height:34px;min-width:44px}
 button.on{border-color:var(--red);color:var(--red)}
 button:active{background:#2a0606}
-main{flex:1;min-height:0;position:relative}
+main{flex:1 1 0;min-height:0;position:relative}
 .view{position:absolute;inset:0;display:none;align-items:center;justify-content:space-between;gap:6px}
 .view.show{display:flex}
 canvas{display:block}
@@ -50,18 +50,17 @@ footer .ro span{font-size:16px}
 #modal{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;padding:24px}
 #modal.show{display:flex}
 #modal div{max-width:520px;background:#111;border:1px solid #333;border-radius:16px;padding:20px;font-size:15px;line-height:1.5}
-@media (orientation:portrait){
-  main{overflow-y:auto}
-  .view{position:static;flex-direction:column;height:auto;padding:8px 0}
-  .view:not(.show){display:none}
-  .big{height:auto;width:min(86vw,44vh);max-width:none}
-  .mid{flex-direction:row;height:auto;width:100%}
-  .small{width:38vw}
-  .line{display:none}
-  .panel{width:100%;height:auto}
-  footer{flex-wrap:wrap;height:auto;padding:6px 0;gap:8px 18px}
-  #status{display:none}
+@media (orientation:landscape) and (max-height:380px){
+  header{height:38px} footer{height:40px} button{height:30px;padding:0 11px}
+  #temp,#clock{font-size:16px}
 }
+@media (orientation:portrait){
+  main,footer,#hint{display:none!important}
+  #status,#clock,#temp,#dot{display:none}
+  header{flex-wrap:wrap;height:auto;justify-content:center;padding:10px 0}
+  #rotate{display:flex}
+}
+#rotate{display:none;flex:1;align-items:center;justify-content:center;text-align:center;color:var(--dim);font-size:18px;padding:24px}
 </style>
 </head>
 <body>
@@ -76,7 +75,7 @@ footer .ro span{font-size:16px}
       <button id="vClus">Cluster</button>
       <button id="bConn">Connect</button>
       <button id="bDemo">Demo</button>
-      <button id="bFull" aria-label="Full screen">⛶</button>
+      <button id="bFull" aria-label="Full screen"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"><path d="M1 5V1h4M11 1h4v4M15 11v4h-4M5 15H1v-4"/></svg></button>
     </div>
   </header>
   <main>
@@ -96,6 +95,7 @@ footer .ro span{font-size:16px}
     </section>
   </main>
   <footer id="foot"></footer>
+  <div id="rotate">Turn your phone sideways to see the dashboard.</div>
 </div>
 <div id="hint">Tap Connect with the engine running, or Demo to preview. Tap a gauge to reset its peak.</div>
 <div id="modal"><div id="modalText"></div></div>
@@ -515,6 +515,14 @@ async function keepAwake() { try { wake = await navigator.wakeLock?.request('scr
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && (st.live || st.demo)) keepAwake(); });
 
 const $ = id => document.getElementById(id);
+function fitApp() {
+  const h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  $('app').style.height = Math.round(h) + 'px';
+}
+fitApp();
+window.addEventListener('resize', fitApp);
+window.visualViewport?.addEventListener('resize', fitApp);
+screen.orientation?.addEventListener?.('change', () => setTimeout(fitApp, 300));
 function setStatus(s) { st.status = s; }
 function showModal(html) { $('modalText').innerHTML = html; $('modal').classList.add('show'); }
 $('modal').onclick = () => $('modal').classList.remove('show');
