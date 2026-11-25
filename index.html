@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>XC90 Dash</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Saira:ital,wght@0,300..700;1,300..700&display=swap" rel="stylesheet">
+<style>
+/* XC90 Dash for Android Chrome (Galaxy S23 Ultra, landscape).
+   Talks to the Veepeak OBDCheck BLE with Web Bluetooth: service FFF0, notify FFF1, write FFF2.
+   Read-only: only AT commands and Mode 01 (current data) requests are ever sent. */
+:root{--red:#ee1f1a;--dim:rgba(255,255,255,.5);--font:Saira,system-ui,sans-serif}
+*{box-sizing:border-box;min-width:0;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#000;color:#fff;font-family:var(--font);overflow:hidden;user-select:none}
+#app{height:100dvh;display:flex;flex-direction:column;
+  padding:env(safe-area-inset-top) max(10px,env(safe-area-inset-right)) env(safe-area-inset-bottom) max(10px,env(safe-area-inset-left))}
+header{display:flex;align-items:center;gap:12px;height:44px;flex:none}
+#temp,#clock{font-size:18px;font-weight:500;font-variant-numeric:tabular-nums}
+#dot{width:9px;height:9px;border-radius:50%;background:var(--red);flex:none}
+#status{font-size:13px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+#clock{flex:none}
+.btns{display:flex;gap:6px;flex:none}
+button{font:500 13px var(--font);color:#fff;background:#151515;border:1px solid #333;border-radius:20px;padding:0 14px;height:34px;min-width:44px}
+button.on{border-color:var(--red);color:var(--red)}
+button:active{background:#2a0606}
+main{flex:1;min-height:0;position:relative}
+.view{position:absolute;inset:0;display:none;align-items:center;justify-content:space-between;gap:6px}
+.view.show{display:flex}
+canvas{display:block}
+.big{height:100%;aspect-ratio:1/1;max-width:41vw;flex:none}
+.mid{flex:1;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+.small{width:min(100%,46vh);aspect-ratio:1/1}
+.emb{font:italic 800 clamp(30px,9vh,56px)/1 var(--font);background:linear-gradient(#fff,#777 55%,#ddd);-webkit-background-clip:text;background-clip:text;color:transparent}
+.line{width:130%;height:2px;background:linear-gradient(90deg,transparent,var(--red),transparent);box-shadow:0 0 10px var(--red)}
+.panel{flex:1;height:100%;display:grid;grid-template-columns:1fr 1fr;align-content:center;gap:8px 12px;padding:10px 12px;
+  border:1px solid rgba(238,31,26,.25);border-radius:16px;background:rgba(255,255,255,.035)}
+.ro b{display:block;font-size:9px;font-weight:600;letter-spacing:.08em;color:var(--dim)}
+.ro span{font-size:18px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ro i{font-style:normal;font-size:10px;color:var(--dim);margin-left:3px}
+.ro.warn span{color:var(--red)}
+footer{height:46px;flex:none;display:flex;align-items:center;gap:22px;justify-content:center}
+footer .ro span{font-size:16px}
+.fuel{width:190px}
+.fuel .bar{height:5px;border-radius:3px;background:rgba(255,255,255,.15);margin-top:4px;overflow:hidden}
+.fuel .bar div{height:100%;background:#fff}
+.fuel.low .bar div{background:var(--red)}
+#hint{position:fixed;inset:auto 0 70px;text-align:center;font-size:12px;color:var(--dim);pointer-events:none}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;padding:24px}
+#modal.show{display:flex}
+#modal div{max-width:520px;background:#111;border:1px solid #333;border-radius:16px;padding:20px;font-size:15px;line-height:1.5}
+@media (orientation:portrait){
+  main{overflow-y:auto}
+  .view{position:static;flex-direction:column;height:auto;padding:8px 0}
+  .view:not(.show){display:none}
+  .big{height:auto;width:min(86vw,44vh);max-width:none}
+  .mid{flex-direction:row;height:auto;width:100%}
+  .small{width:38vw}
+  .line{display:none}
+  .panel{width:100%;height:auto}
+  footer{flex-wrap:wrap;height:auto;padding:6px 0;gap:8px 18px}
+  #status{display:none}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span id="temp">—°F</span>
+    <span id="dot"></span>
+    <span id="status">Not connected</span>
+    <span id="clock"></span>
+    <div class="btns">
+      <button id="vPerf" class="on">Performance</button>
+      <button id="vClus">Cluster</button>
+      <button id="bConn">Connect</button>
+      <button id="bDemo">Demo</button>
+      <button id="bFull" aria-label="Full screen">⛶</button>
+    </div>
+  </header>
+  <main>
+    <section id="perf" class="view show">
+      <canvas id="gTorque" class="big"></canvas>
+      <div class="mid">
+        <canvas id="gBoost" class="small"></canvas>
+        <div class="emb">T6</div>
+        <div class="line"></div>
+      </div>
+      <canvas id="gPower" class="big"></canvas>
+    </section>
+    <section id="clus" class="view">
+      <canvas id="gSpeed" class="big"></canvas>
+      <div class="panel" id="panel"></div>
+      <canvas id="gRpm" class="big"></canvas>
+    </section>
+  </main>
+  <footer id="foot"></footer>
+</div>
+<div id="hint">Tap Connect with the engine running, or Demo to preview. Tap a gauge to reset its peak.</div>
+<div id="modal"><div id="modalText"></div></div>
+
+<script>
+{
+// ---------- Gauge drawing ----------
+const RED = '#ee1f1a', DEEP = '#730505', F = 'Saira, system-ui, sans-serif';
+const S = 135, SW = 270, rad = d => d * Math.PI / 180;
+const pt = (cx, cy, r, d) => [cx + r * Math.cos(rad(d)), cy + r * Math.sin(rad(d))];
+const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
+
+const SPEC = {
+  torque: {style:'chrome', min:0, max:400, major:40, minor:4, title:'Torque', unit:'lb·ft', fmt:0},
+  power:  {style:'chrome', min:0, max:340, major:20, minor:2, title:'Horsepower', unit:'hp', fmt:0},
+  boost:  {style:'chrome', min:0, max:30, major:5, minor:5, red:20, title:'Boost', unit:'psi', fmt:1, compact:true},
+  speed:  {style:'volvo', min:0, max:160, major:20, minor:4, unit:'mph', fmt:0},
+  rpm:    {style:'volvo', min:0, max:8, major:1, minor:5, red:6.5, unit:'psi boost', caption:'rpm ×1000', fmt:0}
+};
+
+function fit(cv) {
+  const d = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w * d) || cv.height !== Math.round(h * d)) {
+    cv.width = Math.round(w * d); cv.height = Math.round(h * d);
+  }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return [ctx, w, h];
+}
+
+// g: spec, v: smoothed needle value, txt: big number text, peak, extra: line under unit
+function drawGauge(cv, g, v, txt, peak, extra) {
+  const [ctx, w, h] = fit(cv);
+  const R = Math.min(w, h) / 2, cx = w / 2, cy = h / 2;
+  if (R < 20) return;
+  const fr = x => clamp((x - g.min) / (g.max - g.min), 0, 1);
+  const ang = S + SW * fr(v ?? g.min), end = S + SW;
+  const chrome = g.style === 'chrome';
+
+  // Face
+  let gr = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * .95);
+  if (chrome) { gr.addColorStop(0, '#131313'); gr.addColorStop(1, '#000'); }
+  else { gr.addColorStop(0, '#270808'); gr.addColorStop(.6, '#0d0202'); gr.addColorStop(1, '#000'); }
+  ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(cx, cy, R * .95, 0, 7); ctx.fill();
+
+  // Rim
+  if (chrome) {
+    const cg = ctx.createConicGradient(rad(-45), cx, cy);
+    [['#f2f2f2',0],['#4d4d4d',.25],['#d9d9d9',.5],['#404040',.75],['#f2f2f2',1]].forEach(([c,s]) => cg.addColorStop(s, c));
+    ctx.strokeStyle = cg; ctx.lineWidth = R * .035;
+    ctx.beginPath(); ctx.arc(cx, cy, R * .965, 0, 7); ctx.stroke();
+    ctx.save(); ctx.shadowColor = RED; ctx.shadowBlur = R * .1;
+    ctx.strokeStyle = 'rgba(238,31,26,.55)'; ctx.lineWidth = R * .04;
+    ctx.beginPath(); ctx.arc(cx, cy, R * .905, rad(S), rad(end)); ctx.stroke(); ctx.restore();
+  } else {
+    ctx.save(); ctx.shadowColor = RED; ctx.shadowBlur = R * .12;
+    const lg = ctx.createLinearGradient(0, cy - R, 0, cy + R);
+    lg.addColorStop(0, '#ff4a3f'); lg.addColorStop(1, DEEP);
+    ctx.strokeStyle = lg; ctx.lineWidth = R * .05;
+    ctx.beginPath(); ctx.arc(cx, cy, R * .94, 0, 7); ctx.stroke(); ctx.restore();
+  }
+
+  // Red zone
+  if (g.red != null) {
+    ctx.strokeStyle = RED; ctx.lineWidth = R * (chrome ? .05 : .045);
+    ctx.beginPath(); ctx.arc(cx, cy, R * (chrome ? .88 : .885), rad(S + SW * fr(g.red)), rad(end)); ctx.stroke();
+  }
+
+  // Ticks & numbers
+  const step = g.major / g.minor, n = Math.round((g.max - g.min) / step);
+  const majors = Math.round((g.max - g.min) / g.major);
+  const nr = chrome ? (g.compact ? .62 : .68) : .635;
+  const fs = R * (g.compact ? .13 : chrome ? (majors > 12 ? .085 : .1) : .13);
+  ctx.font = `${chrome ? 'italic ' : ''}500 ${fs}px ${F}`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (let i = 0; i <= n; i++) {
+    const val = g.min + i * step, d = S + SW * fr(val), maj = i % g.minor === 0;
+    const inRed = !chrome && g.red != null && val >= g.red - 1e-9;
+    const r0 = chrome ? (maj ? .79 : .845) : (maj ? .74 : .79), r1 = chrome ? .895 : .86;
+    const [x0, y0] = pt(cx, cy, R * r0, d), [x1, y1] = pt(cx, cy, R * r1, d);
+    ctx.strokeStyle = inRed ? RED : `rgba(255,255,255,${maj ? 1 : .65})`;
+    ctx.lineWidth = maj ? R * (chrome ? .018 : .022) : R * .009;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    if (maj) { const [tx, ty] = pt(cx, cy, R * nr, d); ctx.fillStyle = '#fff'; ctx.fillText(String(Math.round(val)), tx, ty); }
+  }
+
+  if (chrome) {
+    if (g.compact) {
+      // Lit arc up to the value
+      if (ang > S + .2) {
+        ctx.save(); ctx.shadowColor = RED; ctx.shadowBlur = R * .08;
+        ctx.strokeStyle = RED; ctx.lineWidth = R * .05;
+        ctx.beginPath(); ctx.arc(cx, cy, R * .905, rad(S), rad(ang)); ctx.stroke(); ctx.restore();
+      }
+    } else {
+      if (peak > 0) {
+        const pa = S + SW * fr(peak), [a, b] = pt(cx, cy, R * .8, pa), [c, e] = pt(cx, cy, R * .92, pa);
+        ctx.strokeStyle = RED; ctx.lineWidth = R * .025; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, e); ctx.stroke(); ctx.lineCap = 'butt';
+      }
+      // Tapered needle
+      const [tx, ty] = pt(cx, cy, R * .86, ang), [bx, by] = pt(cx, cy, R * .12, ang + 180);
+      const [lx, ly] = pt(cx, cy, R * .025, ang - 90), [rx, ry] = pt(cx, cy, R * .025, ang + 90);
+      ctx.save(); ctx.shadowColor = RED; ctx.shadowBlur = R * .08; ctx.fillStyle = RED;
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(lx, ly); ctx.lineTo(tx, ty); ctx.lineTo(rx, ry); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      const [hx, hy] = pt(cx, cy, R * .8, ang);
+      ctx.strokeStyle = '#ff9c94'; ctx.lineWidth = Math.max(1, R * .006);
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(hx, hy); ctx.stroke();
+      // Hub
+      ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(cx, cy, R * .085, 0, 7); ctx.fill();
+      const hg = ctx.createLinearGradient(0, cy - R * .085, 0, cy + R * .085);
+      hg.addColorStop(0, '#e6e6e6'); hg.addColorStop(1, '#4d4d4d');
+      ctx.strokeStyle = hg; ctx.lineWidth = R * .018; ctx.stroke();
+    }
+    // Labels
+    ctx.fillStyle = 'rgba(255,255,255,.9)';
+    ctx.font = `italic 400 ${R * (g.compact ? .16 : .1)}px ${F}`;
+    ctx.fillText(g.title, cx, cy - R * (g.compact ? .32 : .38));
+    const vy = cy + R * (g.compact ? .1 : .46);
+    ctx.fillStyle = '#fff';
+    ctx.font = `italic 500 ${R * (g.compact ? .32 : .25)}px ${F}`;
+    ctx.fillText(txt, cx, vy);
+    ctx.font = `italic 400 ${R * (g.compact ? .14 : .09)}px ${F}`;
+    ctx.fillStyle = 'rgba(255,255,255,.85)';
+    ctx.fillText(g.unit, cx, vy + R * (g.compact ? .25 : .2));
+    if (!g.compact && peak > 0) {
+      ctx.font = `600 ${R * .06}px ${F}`; ctx.fillStyle = RED;
+      ctx.fillText('PEAK ' + peak.toFixed(g.fmt), cx, vy + R * .31);
+    }
+  } else {
+    // Volvo-style red sweep and needle
+    if (ang > S + .2) {
+      const sg = ctx.createRadialGradient(cx, cy, R * .43, cx, cy, R * .55);
+      sg.addColorStop(0, 'rgba(115,5,5,.5)'); sg.addColorStop(1, RED);
+      ctx.fillStyle = sg; ctx.beginPath();
+      ctx.arc(cx, cy, R * .55, rad(S), rad(ang)); ctx.arc(cx, cy, R * .43, rad(ang), rad(S), true);
+      ctx.closePath(); ctx.fill();
+    }
+    const [a, b] = pt(cx, cy, R * .44, ang), [c, e] = pt(cx, cy, R * .87, ang);
+    ctx.save(); ctx.shadowColor = RED; ctx.shadowBlur = R * .06;
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(2, R * .022); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, e); ctx.stroke(); ctx.restore();
+    // Hub
+    const hg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * .42);
+    hg.addColorStop(0, '#171717'); hg.addColorStop(1, '#000');
+    ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(cx, cy, R * .42, 0, 7); ctx.fill();
+    const rg = ctx.createLinearGradient(0, cy - R * .42, 0, cy + R * .42);
+    rg.addColorStop(0, RED); rg.addColorStop(1, DEEP);
+    ctx.strokeStyle = rg; ctx.lineWidth = R * .025; ctx.stroke();
+    // Center text
+    ctx.fillStyle = '#fff'; ctx.font = `300 ${R * .3}px ${F}`;
+    ctx.fillText(txt, cx, cy - R * .05);
+    ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = `400 ${R * .07}px ${F}`;
+    ctx.fillText(g.unit || '', cx, cy + R * .16);
+    if (extra) { ctx.fillStyle = RED; ctx.font = `600 ${R * .08}px ${F}`; ctx.fillText(extra, cx, cy + R * .28); }
+    if (g.caption) {
+      ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = `400 ${R * .075}px ${F}`;
+      const [qx, qy] = pt(cx, cy, R * .76, 90); ctx.fillText(g.caption, qx, qy);
+    }
+  }
+}
+
+// ---------- OBD parsing ----------
+const SIZE = {0x00:4,0x04:1,0x05:1,0x06:1,0x07:1,0x0B:1,0x0C:2,0x0D:1,0x0E:1,0x0F:1,0x10:2,0x11:1,
+  0x1F:2,0x20:4,0x2F:1,0x31:2,0x33:1,0x3C:2,0x40:4,0x42:2,0x44:2,0x46:1,0x49:1,0x59:2,0x60:4,0x62:1,
+  0x63:2,0x80:4,0xA0:4,0xA6:4,0xC0:4};
+const hex = n => n.toString(16).toUpperCase().padStart(2, '0');
+const bytes = s => { const o = []; for (let i = 0; i < s.length; i += 2) o.push(parseInt(s.slice(i, i + 2), 16)); return o; };
+const clean = raw => raw.replace(/[^\x20-\x7E\r\n]/g, '').replace(/>/g, '').split(/[\r\n]+/).map(s => s.trim()).filter(Boolean).join(' | ');
+
+function messages(raw) {
+  const data = {}, exp = {};
+  for (const l of raw.toUpperCase().split(/[\r\n]+/)) {
+    const line = l.replace(/\s/g, '');
+    if (line.length < 5 || line.length % 2 !== 1 || !/^[0-9A-F]+$/.test(line)) continue;
+    const id = line.slice(0, 3), by = bytes(line.slice(3)), pci = by[0];
+    const kind = pci >> 4;
+    if (kind === 0) { const n = pci & 15; if (n < 1 || by.length < 1 + n) continue; data[id] = by.slice(1, 1 + n); exp[id] = n; }
+    else if (kind === 1) { if (by.length < 2) continue; exp[id] = ((pci & 15) << 8) | by[1]; data[id] = by.slice(2); }
+    else if (kind === 2) { data[id] = (data[id] || []).concat(by.slice(1)); }
+  }
+  for (const id in exp) if (data[id] && data[id].length > exp[id]) data[id] = data[id].slice(0, exp[id]);
+  return data;
+}
+function decode(p, pids) {
+  if (!p || p[0] !== 0x41) return null;
+  const out = new Map(); let i = 1;
+  while (i < p.length) { const pid = p[i], n = SIZE[pid]; if (!n || i + n >= p.length) return null; out.set(pid, p.slice(i + 1, i + 1 + n)); i += 1 + n; }
+  return pids.every(x => out.has(x)) ? out : null;
+}
+function frames(pids) {
+  const len = 1 + pids.reduce((s, p) => s + 1 + (SIZE[p] || 1), 0);
+  return len <= 7 ? 1 : Math.min(15, 1 + Math.ceil((len - 6) / 7));
+}
+function bitmap(four, base) {
+  const out = [];
+  four.forEach((b, bi) => { for (let bit = 0; bit < 8; bit++) if (b & (0x80 >> bit)) out.push(base + bi * 8 + bit + 1); });
+  return out;
+}
+const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ---------- State ----------
+const r = {};                      // latest readings, US units
+const trip = {mi: 0, gal: 0, last: 0};
+const peak = {torque: 0, power: 0, boost: 0};
+const st = {supported: new Set(), useCount: true, status: 'Not connected', live: false, demo: false, vps: 0};
+const FAST = [0x0C, 0x0D, 0x0B, 0x62, 0x11, 0x10];
+const SLOW = [0x05, 0x0F, 0x46, 0x33, 0x2F, 0x04, 0x0E, 0x49, 0x44, 0x06, 0x07, 0x3C, 0x1F];
+const RARE = [0x63, 0xA6, 0x59, 0x31];
+const fC = c => c * 9 / 5 + 32;
+
+const D = {
+  boost: () => r.mapKPa == null ? null : (r.mapKPa - (r.baroKPa ?? 101.3)) * 0.145038,
+  gph: () => r.maf == null ? null : r.maf / (14.7 * (r.lambda ?? 1)) * 3600 / 2835,
+  mpg() { const g = D.gph(); return r.mph > 2 && g > .01 ? Math.min(r.mph / g, 99) : null; },
+  tripMpg: () => trip.gal > .02 ? Math.min(trip.mi / trip.gal, 99) : null,
+  torque: () => r.tqPct == null || r.refNm == null ? null : Math.max(r.tqPct, 0) / 100 * r.refNm * 0.737562,
+  power() { const t = D.torque(); return t == null || r.rpm == null ? null : t * r.rpm / 5252; },
+  afr: () => r.lambda == null ? null : r.lambda * 14.7,
+  gal: () => r.fuel == null ? null : r.fuel / 100 * 18.8,
+  range() { const g = D.gal(), m = D.tripMpg(); return g != null && m != null && trip.mi > 1 ? g * m : null; }
+};
+
+function apply(pid, b) {
+  const a = b[0], ab = b.length > 1 ? a * 256 + b[1] : a;
+  switch (pid) {
+    case 0x0C: r.rpm = ab / 4; break;
+    case 0x0D: r.mph = a * 0.621371; break;
+    case 0x11: r.throttle = a * 100 / 255; break;
+    case 0x04: r.load = a * 100 / 255; break;
+    case 0x0B: r.mapKPa = a; break;
+    case 0x10: r.maf = ab / 100; break;
+    case 0x05: r.coolant = fC(a - 40); break;
+    case 0x0F: r.intake = fC(a - 40); break;
+    case 0x46: r.ambient = fC(a - 40); break;
+    case 0x33: r.baroKPa = a; break;
+    case 0x3C: r.cat = fC(ab / 10 - 40); break;
+    case 0x2F: r.fuel = a * 100 / 255; break;
+    case 0x0E: r.timing = a / 2 - 64; break;
+    case 0x49: r.pedal = a * 100 / 255; break;
+    case 0x44: r.lambda = ab * 2 / 65536; break;
+    case 0x06: r.stft = a / 1.28 - 100; break;
+    case 0x07: r.ltft = a / 1.28 - 100; break;
+    case 0x62: r.tqPct = a - 125; break;
+    case 0x63: r.refNm = ab; break;
+    case 0x59: r.railPsi = ab * 10 * 0.145038; break;
+    case 0x31: r.sinceClear = ab * 0.621371; break;
+    case 0x1F: r.runSec = ab; break;
+    case 0xA6: r.odo = b.reduce((s, x) => s * 256 + x, 0) / 10 * 0.621371; break;
+  }
+}
+
+function accumulate() {
+  const now = performance.now(), dt = (now - trip.last) / 1000;
+  if (trip.last && dt > 0 && dt < 2) {
+    if (r.mph != null) trip.mi += r.mph * dt / 3600;
+    const g = D.gph(); if (g != null) trip.gal += g * dt / 3600;
+  }
+  trip.last = now;
+}
+
+// ---------- Bluetooth / ELM327 ----------
+let dev = null, wch = null, buf = '', waiter = null, queue = Promise.resolve(), loopGen = 0, vCount = 0;
+const enc = new TextEncoder(), dec = new TextDecoder();
+
+function onNotify(e) {
+  buf += dec.decode(e.target.value);
+  const i = buf.indexOf('>');
+  if (i >= 0 && waiter) { const rep = buf.slice(0, i); buf = buf.slice(i + 1); const w = waiter; waiter = null; w(rep); }
+}
+
+// One command at a time; a reply is complete only at the '>' prompt.
+function send(cmd, ms) {
+  const run = () => new Promise((res, rej) => {
+    if (!wch) return rej(new Error('Adapter not connected'));
+    buf = '';
+    const t = setTimeout(() => { if (waiter) { waiter = null; rej(new Error('timeout')); } },
+      ms ?? (cmd === 'ATZ' || cmd.startsWith('0100') ? 6000 : 2000));
+    waiter = rep => { clearTimeout(t); res(rep); };
+    const data = enc.encode(cmd + '\r');
+    const p = wch.properties.write ? wch.writeValueWithResponse(data) : wch.writeValueWithoutResponse(data);
+    p.catch(e => { if (waiter) { waiter = null; clearTimeout(t); rej(e); } });
+  });
+  const p = queue.then(run, run);
+  queue = p.catch(() => {});
+  return p;
+}
+
+async function connect() {
+  if (!navigator.bluetooth) {
+    showModal('This browser can\'t use Bluetooth. Open this page in <b>Chrome</b> on your phone, from an <b>https://</b> address.');
+    return;
+  }
+  try {
+    stopDemo();
+    if (!dev) {
+      dev = await navigator.bluetooth.requestDevice({
+        filters: [{namePrefix: 'VEEPEAK'}, {namePrefix: 'Veepeak'}, {namePrefix: 'OBD'}, {services: [0xfff0]}],
+        optionalServices: [0xfff0]
+      });
+      dev.addEventListener('gattserverdisconnected', onDisconnect);
+    }
+    setStatus('Connecting…');
+    const server = await dev.gatt.connect();
+    const svc = await server.getPrimaryService(0xfff0);
+    const nch = await svc.getCharacteristic(0xfff1);
+    wch = await svc.getCharacteristic(0xfff2);
+    await nch.startNotifications();
+    nch.addEventListener('characteristicvaluechanged', onNotify);
+    keepAwake();
+    loop();
+  } catch (e) {
+    if (e.name === 'NotFoundError') setStatus('No adapter chosen');
+    else if (e.name === 'SecurityError') showModal('Bluetooth is blocked on this copy of the page. Open your own copy of the dashboard (your GitHub Pages link) in <b>Chrome</b>, then tap Connect. Demo works here.');
+    else setStatus('Could not connect: ' + e.message);
+  }
+}
+
+function onDisconnect() {
+  wch = null; loopGen++; st.live = false;
+  setStatus('Adapter disconnected — tap Connect');
+}
+
+async function loop() {
+  const gen = ++loopGen;
+  while (gen === loopGen) {
+    try { await init(gen); await poll(gen); }
+    catch (e) {
+      if (gen !== loopGen) break;
+      st.live = false;
+      setStatus(e.message === 'timeout' ? 'Adapter did not answer' : e.message);
+      if (!wch) break;
+      await sleep(3000);
+    }
+  }
+}
+
+async function init(gen) {
+  setStatus('Initializing adapter…');
+  for (const c of ['ATZ', 'ATE0', 'ATL0', 'ATS0', 'ATH1', 'ATSP6', 'ATSH7DF', 'ATAT1']) {
+    if (gen !== loopGen) return; await send(c);
+  }
+  setStatus('Asking engine which sensors it supports…');
+  const found = new Set(); let base = 0;
+  while (base <= 0xC0) {
+    const m = messages(await send('01' + hex(base)))['7E8'];
+    if (!m || m.length < 6 || m[0] !== 0x41 || m[1] !== base) break;
+    const p = bitmap(m.slice(2, 6), base); p.forEach(x => found.add(x));
+    if (p.includes(base + 0x20)) base += 0x20; else break;
+  }
+  if (!found.size) throw new Error('No answer from the engine — is it running?');
+  st.supported = found;
+}
+
+async function request(pids) {
+  let cmd = '01' + pids.map(hex).join('');
+  if (st.useCount) cmd += frames(pids).toString(16).toUpperCase();
+  let raw;
+  try { raw = await send(cmd); } catch (e) { if (e.message === 'timeout') return false; throw e; }
+  const d = decode(messages(raw)['7E8'], pids);
+  if (!d) return false;
+  d.forEach((b, pid) => apply(pid, b));
+  return true;
+}
+
+async function poll(gen) {
+  const grp = a => chunk(a.filter(p => st.supported.has(p)), 6);
+  const fast = grp(FAST), slow = grp(SLOW), rare = grp(RARE);
+  let cycle = 0, bad = 0;
+  trip.last = 0; st.live = true; setStatus('Live');
+  while (gen === loopGen) {
+    const groups = [...fast];
+    if (cycle % 10 === 0) groups.push(...slow);
+    if (cycle % 50 === 0) groups.push(...rare);
+    for (const g of groups) {
+      if (gen !== loopGen) return;
+      if (await request(g)) { bad = 0; vCount += g.length; }
+      else if (++bad >= 3 && st.useCount) { st.useCount = false; bad = 0; }   // adapter mishandles the count digit
+    }
+    if (cycle % 10 === 0) {
+      try { const v = clean(await send('ATRV')).replace(/[^0-9.]/g, ''); if (v) r.battV = parseFloat(v); } catch (e) {}
+    }
+    accumulate(); cycle++;
+    if (!fast.length) await sleep(200);
+  }
+}
+
+// ---------- Demo mode (simulated drive, no adapter) ----------
+let demoTimer = null;
+function startDemo() {
+  loopGen++; st.live = false; st.demo = true; setStatus('Demo — simulated data'); keepAwake();
+  const t0 = performance.now();
+  Object.assign(r, {refNm: 400, baroKPa: 99, ambient: 53, fuel: 62, odo: 57020, coolant: 196, intake: 68, cat: 1150,
+    battV: 14.2, stft: 1.6, ltft: -2.3, railPsi: 2200, timing: 12});
+  demoTimer = setInterval(() => {
+    const t = (performance.now() - t0) / 1000, ph = (t % 14) / 14;
+    const pull = ph < .45 ? Math.pow(ph / .45, 1.3) : ph < .55 ? 1 : Math.max(0, 1 - (ph - .55) / .2);
+    const thr = ph < .5 ? (ph < .02 ? 20 : 100) : ph < .6 ? 5 : 12;
+    r.rpm = 800 + 5600 * pull + Math.random() * 40;
+    r.mph = clamp((r.mph ?? 0) + (pull > .2 && ph < .5 ? .6 : -.5), 0, 110);
+    r.throttle = thr; r.pedal = thr * .95; r.load = 20 + 75 * pull;
+    r.mapKPa = 99 + (ph < .55 ? pull * 185 - 60 : -60);
+    r.tqPct = ph < .55 ? 20 + 76 * Math.min(1, pull * 1.6) - 25 * Math.max(0, pull - .8) : 8;
+    r.maf = 4 + 180 * pull; r.lambda = pull > .7 ? .85 : 1; r.runSec = t + 360;
+    r.timing = 18 - 12 * pull;
+    accumulate();
+  }, 80);
+}
+function stopDemo() { if (demoTimer) { clearInterval(demoTimer); demoTimer = null; } st.demo = false; }
+
+// ---------- Screen, UI ----------
+let wake = null;
+async function keepAwake() { try { wake = await navigator.wakeLock?.request('screen'); } catch (e) {} }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && (st.live || st.demo)) keepAwake(); });
+
+const $ = id => document.getElementById(id);
+function setStatus(s) { st.status = s; }
+function showModal(html) { $('modalText').innerHTML = html; $('modal').classList.add('show'); }
+$('modal').onclick = () => $('modal').classList.remove('show');
+
+let view = 'perf';
+function setView(v) {
+  view = v;
+  $('perf').classList.toggle('show', v === 'perf'); $('clus').classList.toggle('show', v === 'clus');
+  $('vPerf').classList.toggle('on', v === 'perf'); $('vClus').classList.toggle('on', v === 'clus');
+  try { localStorage.setItem('view', v); } catch (e) {}
+}
+$('vPerf').onclick = () => setView('perf');
+$('vClus').onclick = () => setView('clus');
+$('bConn').onclick = connect;
+$('bDemo').onclick = () => st.demo ? (stopDemo(), setStatus(wch ? 'Live' : 'Not connected'), wch && loop()) : startDemo();
+$('bFull').onclick = async () => {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else { await document.documentElement.requestFullscreen(); await screen.orientation?.lock?.('landscape'); }
+  } catch (e) {}
+};
+$('gTorque').onclick = () => peak.torque = 0;
+$('gPower').onclick = () => peak.power = 0;
+$('gBoost').onclick = () => peak.boost = 0;
+try { const v = localStorage.getItem('view'); if (v === 'clus') setView('clus'); } catch (e) {}
+
+const f = (v, d = 0) => v == null || !isFinite(v) ? '—' : v.toFixed(d);
+const ro = (label, val, unit, warn) =>
+  `<div class="ro${warn ? ' warn' : ''}"><b>${label}</b><span>${val}</span>${unit ? `<i>${unit}</i>` : ''}</div>`;
+const dur = s => { if (s == null) return '—'; s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` : `${m}:${String(x).padStart(2, '0')}`; };
+
+function updateText() {
+  $('temp').textContent = r.ambient == null ? '—°F' : `${r.ambient.toFixed(0)}°F`;
+  $('status').textContent = st.status + (st.live ? ` · ${st.vps.toFixed(0)} values/s` : '');
+  $('dot').style.background = st.live ? '#2ecc40' : st.demo ? '#f5c400' : '#ee1f1a';
+  $('clock').textContent = new Date().toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+  $('bConn').textContent = wch ? 'Connected' : 'Connect';
+  $('bDemo').classList.toggle('on', st.demo);
+  $('hint').style.display = st.live || st.demo ? 'none' : 'block';
+
+  const mpg = D.mpg();
+  $('panel').innerHTML = [
+    ro('Coolant', f(r.coolant), '°F', r.coolant > 235),
+    ro('Intake air', f(r.intake), '°F'),
+    ro('Catalyst', f(r.cat), '°F'),
+    ro('Battery', f(r.battV, 1), 'V', r.battV != null && r.battV < 12),
+    ro('Throttle', f(r.throttle), '%'),
+    ro('Pedal', f(r.pedal), '%'),
+    ro('Torque ≈', f(D.torque()), 'lb-ft'),
+    ro('Load', f(r.load), '%'),
+    ro('Timing', f(r.timing, 1), '°'),
+    ro('Air/fuel', f(D.afr(), 1), ':1'),
+    ro('Trim S/L', r.stft == null ? '—' : `${r.stft >= 0 ? '+' : ''}${f(r.stft)} / ${r.ltft >= 0 ? '+' : ''}${f(r.ltft)}`, '%'),
+    mpg != null ? ro('Now ≈', f(mpg), 'mpg') : ro('Fuel flow ≈', f(D.gph(), 2), 'gal/h')
+  ].join('');
+
+  const fuelPct = clamp(r.fuel ?? 0, 0, 100), low = r.fuel != null && r.fuel < 12, rng = D.range();
+  const fuel = `<div class="fuel${low ? ' low' : ''}"><div class="ro"><b>FUEL</b><span>${f(r.fuel)}%</span>` +
+    `<i>${D.gal() != null ? '≈ ' + f(D.gal(), 1) + ' gal' : ''}${rng != null ? ' · ≈ ' + f(rng) + ' mi' : ''}</i></div>` +
+    `<div class="bar"><div style="width:${fuelPct}%"></div></div></div>`;
+
+  $('foot').innerHTML = view === 'perf' ? [
+    ro('RPM', f(r.rpm)), ro('Speed', f(r.mph), 'mph'), ro('Throttle', f(r.throttle), '%'),
+    ro('Pedal', f(r.pedal), '%'), ro('Intake', f(r.intake), '°F'), ro('Timing', f(r.timing, 1), '°')
+  ].join('') : [
+    ro('Odometer', r.odo == null ? '—' : Math.round(r.odo).toLocaleString(), 'mi'), ro('Engine on', dur(r.runSec)),
+    ro('Trip', trip.mi.toFixed(1), 'mi'), ro('Trip ⌀', f(D.tripMpg(), 1), 'mpg'), fuel
+  ].join('');
+}
+let lastV = 0, lastVT = performance.now();
+setInterval(() => {
+  const now = performance.now(); st.vps = (vCount - lastV) / ((now - lastVT) / 1000); lastV = vCount; lastVT = now;
+}, 1000);
+setInterval(updateText, 250);
+updateText();
+
+// ---------- Render loop with needle smoothing ----------
+const disp = {torque: 0, power: 0, boost: 0, speed: 0, rpm: 0};
+let lastT = performance.now();
+function frame(now) {
+  const k = Math.min(1, (now - lastT) / 1000 * 12); lastT = now;
+  const tgt = {torque: D.torque(), power: D.power(), boost: D.boost(), speed: r.mph, rpm: r.rpm == null ? null : r.rpm / 1000};
+  for (const key in disp) disp[key] += ((tgt[key] ?? 0) - disp[key]) * k;
+  if (tgt.torque > peak.torque) peak.torque = tgt.torque;
+  if (tgt.power > peak.power) peak.power = tgt.power;
+  if (tgt.boost > peak.boost) peak.boost = tgt.boost;
+
+  if (view === 'perf') {
+    drawGauge($('gTorque'), SPEC.torque, disp.torque, f(tgt.torque), peak.torque);
+    drawGauge($('gPower'), SPEC.power, disp.power, f(tgt.power), peak.power);
+    drawGauge($('gBoost'), SPEC.boost, disp.boost, f(tgt.boost, 1), peak.boost);
+  } else {
+    const b = D.boost(), hp = D.power();
+    drawGauge($('gSpeed'), SPEC.speed, disp.speed, f(r.mph), 0, null);
+    drawGauge($('gRpm'), SPEC.rpm, disp.rpm, b == null ? '—' : (b >= 0 ? '+' : '') + b.toFixed(1), 0,
+      hp == null ? null : `≈ ${hp.toFixed(0)} hp`);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+}
+</script>
+</body>
+</html>
